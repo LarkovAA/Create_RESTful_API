@@ -1,34 +1,33 @@
-from fastapi import FastAPI, status, HTTPException, Depends
+from fastapi import FastAPI, status, HTTPException, Depends, Request, Response
 from BModel import UseRegiste, Settings, UseLogin, UserCreateTask, UseWork, RacordsText, Users as BU, TextRecorde
 from database import SessionLocal
 from models import Users, Records
-from fastapi_jwt_auth import AuthJWT
 from typing import List
 
+from fastapi_jwt_auth import AuthJWT
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+
+from redis import asyncio as aioredis
+
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
+#
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 db = SessionLocal()
-
 
 @AuthJWT.load_config
 def get_config():
     return Settings()
-
-
-@app.get('/')
-def index():
-    return {'hello': 'Hello'}
-
-@app.get('/all_users', response_model=List[BU])
-def all_users():
-    all_users = db.query(Users).all()
-    return all_users
-
-@app.get('/all_recors', response_model=List[RacordsText])
-def all_users():
-    all_users = db.query(Records).all()#
-    return all_users
-
 
 @app.post('/register', response_model=UseRegiste, status_code= status.HTTP_200_OK)
 def register_new_user(user:UseRegiste):
@@ -82,7 +81,8 @@ def login_user(user: UseLogin, Authorize: AuthJWT=Depends()):
 
 
 @app.post('/logout', status_code=status.HTTP_200_OK)
-def log_out(user: UseWork):
+@limiter.limit("100/minute")
+def log_out(request: Request, response: Response, user: UseWork):
     '''
     Функция обрабаотывает запрос на url /logout проводит выход пользователя из системы
     :param user: Объект pydantic представляющий JSON формат
@@ -106,7 +106,8 @@ def log_out(user: UseWork):
 
 
 @app.post('/tasks', status_code=status.HTTP_200_OK)
-def create_task(user: UserCreateTask):
+@limiter.limit("100/minute")
+def create_task(request: Request, response: Response, user: UserCreateTask):
     '''
     Функция обрабаотывает запрос на url /tasks авторизированный пользователь создает новую запись
     :param user: Объект pydantic представляющий JSON формат
@@ -129,8 +130,10 @@ def create_task(user: UserCreateTask):
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Вы не залогинены.')
 
-@app.get('/tasks', response_model=List[RacordsText], status_code=status.HTTP_200_OK) #
-def all_task(Authorize:AuthJWT=Depends()):
+@app.get('/tasks', response_model=List[RacordsText], status_code=status.HTTP_200_OK)
+@cache(expire=60)
+@limiter.limit("100/minute")
+def all_task(request: Request, response: Response, Authorize:AuthJWT=Depends()):
     try:
         Authorize.jwt_required()
     except:
@@ -148,7 +151,9 @@ def all_task(Authorize:AuthJWT=Depends()):
         return records
 
 @app.get('/tasks/{task}', response_model=RacordsText, status_code=status.HTTP_200_OK)
-def get_task(task: int, Authorize:AuthJWT=Depends()):
+@cache(expire=60)
+@limiter.limit("100/minute")
+def get_task(request: Request, response: Response, task: int, Authorize:AuthJWT=Depends()):
     try:
         Authorize.jwt_required()
     except:
@@ -166,7 +171,8 @@ def get_task(task: int, Authorize:AuthJWT=Depends()):
         return records
 
 @app.put('/tasks/{task}', response_model=RacordsText, status_code=status.HTTP_200_OK)
-def update_task(task: int, text: TextRecorde, Authorize:AuthJWT=Depends()):
+@limiter.limit("100/minute")
+def update_task(request: Request, response: Response, task: int, text: TextRecorde, Authorize:AuthJWT=Depends()):
     try:
         Authorize.jwt_required()
     except:
@@ -195,7 +201,8 @@ def update_task(task: int, text: TextRecorde, Authorize:AuthJWT=Depends()):
     return record
 
 @app.delete('/tasks/{task}', response_model=RacordsText, status_code=status.HTTP_200_OK)
-def del_task(task:int, Authorize:AuthJWT=Depends()):
+@limiter.limit("100/minute")
+def del_task(request: Request, response: Response, task:int, Authorize:AuthJWT=Depends()):
     try:
         Authorize.jwt_required()
     except:
@@ -218,3 +225,11 @@ def del_task(task:int, Authorize:AuthJWT=Depends()):
         db.commit()
 
     return del_record
+
+#Redis при начале работы запускается данная функция
+@app.on_event("startup")
+async def startup():
+    redis = aioredis.from_url("redis://localhost:6379", encodings='utf8', decode_responses=True)
+    FastAPICache.init(RedisBackend(redis), prefix="fastapi-cache")
+
+
