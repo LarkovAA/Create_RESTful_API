@@ -29,6 +29,25 @@ db = SessionLocal()
 def get_config():
     return Settings()
 
+
+@app.get('/')
+@cache(expire=60)
+def index():
+    return {'hello': 'Hello'}
+
+@app.get('/all_users', response_model=List[BU])
+@cache(expire=60)
+def all_users():
+    all_users = db.query(Users).all()
+    return all_users
+
+@app.get('/all_recors', response_model=List[RacordsText])
+@cache(expire=60)
+def all_records():
+    all_users = db.query(Records).all()
+    return all_users
+
+
 @app.post('/register', response_model=UseRegiste, status_code= status.HTTP_200_OK)
 def register_new_user(user:UseRegiste):
     '''

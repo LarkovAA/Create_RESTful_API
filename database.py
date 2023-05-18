@@ -13,7 +13,7 @@ with open('settings_database.txt', 'r', encoding='UTF-8') as read_set:
     name_BD = text[4].split(':')[1].strip()
 
 
-engine = create_engine(f'postgresql://{used}:{password}{host}:{port}/{name_BD}',
+engine = create_engine(f'postgresql+psycopg2://{used}:{password}{host}:{port}/{name_BD}',
                        echo=True)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)

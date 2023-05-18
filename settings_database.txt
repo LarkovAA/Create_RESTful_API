@@ -1,5 +1,5 @@
-used: postgres
-password: lexa2454811
+used: 
+password: 
 host: @localhost
 port: 5432
-name BD: rest_api
+name BD: 
